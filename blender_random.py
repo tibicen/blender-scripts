@@ -19,6 +19,7 @@ def boolean(objA, objB):
 
 
 # CREATE ALL MATERIALS AT ONCE
+# TODO create material nodes based on object index and color ramp
 mat = bpy.data.materials.new('MAT')
 mat.diffuse_color = (.9, .9, .9)
 # materials = []
