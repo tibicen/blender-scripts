@@ -19,78 +19,48 @@ bl_info = {
 }
 
 
-# TEST UNITS CODE:
+# TEST UNITS CODE:#############################################################
+RANDOM_TEST_NR = randrange(0, 500)
+
+def createMat():
+    bpy.data.scenes[0].render.engine = 'CYCLES'
+    for obj in bpy.data.objects:
+        if obj.type == 'MESH' or obj.type == 'CURVE':
+            obj.select = True
+            MAT = bpy.data.materials.new('Mat')
+            MAT.use_nodes = True
+            obj.data.materials.append(MAT)
+            obj.select = False
+
+
 class RandomCubes(bpy.types.Operator):
     """Create random objects test case"""
     bl_idname = "object.random_cubes"
-    bl_label = "random cubes"
+    bl_label = "Create Random Cubes"
 
     @classmethod
     def poll(cls, context):
         return context.active_object is not None
 
     def execute(self, context):
-        locations = [(randrange(-5, 5),
-                      randrange(0, 10),
-                      randrange(1, 10)) for x in range(50)]
         locations = []
-        for x in range(-5, 5):
-            for y in range(-5, 5):
-                for z in range(10):
-                    loc = (x * 3 + 2 * random() - 1, y * 3 + 2 *
-                           random() - 1, z * 3 + 2 * random() - 1)
-                    locations.append(loc)
+        xRows = bpy.data.scenes[0].matpass_settings.xRows
+        for x in range(0, xRows):
+            for y in range(0, xRows):
+                for z in range(1):
+                    if randrange(0, 2):
+                        loc = (x * 2.5 + random() - .5, y * 2.5 +
+                               random() - .5, z * 2.5 + random() - .5)
+                        locations.append(loc)
         for loc in locations:
             bpy.ops.mesh.primitive_cube_add(location=(loc))
+            obj = bpy.data.scenes[0].objects.active
+            lays = [False for x in range(19)]
+            lays.insert(randrange(0, 20), True)
+            obj.layers = lays
+        createMat()
         return {'FINISHED'}
-
-
-class CreateMat(bpy.types.Operator):
-    """Create new materials for all objects"""
-    bl_idname = "material.create_new_materials"
-    bl_label = "Create materials"
-
-    @classmethod
-    def poll(cls, context):
-        return context.active_object is not None
-
-    def execute(self, context):
-        for obj in bpy.data.objects:
-            if obj.type == 'MESH' or obj.type == 'CURVE':
-                obj.select = True
-                MAT = bpy.data.materials.new('Mat')
-                MAT.use_nodes = True
-                obj.data.materials.append(MAT)
-                obj.select = False
-        return {'FINISHED'}
-
-
-class asign_material_indexes(bpy.types.Operator):
-    """Asign material index for all materials"""
-    bl_idname = "material.asign_material_indexes"
-    bl_label = "Asign materials index"
-
-    @classmethod
-    def poll(cls, context):
-        return context.active_object is not None
-
-    def execute(self, context):
-        color = True
-        indexes = [False if x.pass_index ==
-                   0 else True for x in bpy.data.materials]
-        if sum(indexes) < len(bpy.data.materials):
-            MatQuant = len(bpy.data.materials)
-            k = 1 / float(MatQuant)
-            for n, mat in enumerate(bpy.data.materials):
-                mat.use_nodes = True
-                mat.pass_index = n + 1
-                if color:
-                    mat.diffuse_color = colorsys.hsv_to_rgb(
-                        k * (n - 1), uniform(.2, .9), uniform(.1, 1))
-                    # for mat in bpy.data.materials:
-                    #     mat.node_tree.nodes["Diffuse BSDF"].inputs[
-                    #         0].default_value = list(mat.diffuse_color) + [1]
-        return {'FINISHED'}
+###############################################################################
 
 
 def asign_material_indexes(color=True):
@@ -114,7 +84,7 @@ def create_nodegroup_matpass():
     Scene.render.layers[0].use_pass_material_index = True
     Tree = Scene.node_tree
     Src = Tree.nodes["Render Layers"]
-    Dst = Tree.nodes["Composite"]
+    # Dst = Tree.nodes["Composite"]
     MatPassGroup = bpy.data.node_groups.new(
         "MatPASS", type='CompositorNodeTree')
     #
@@ -165,13 +135,14 @@ def asign_object_indexes():
 def create_nodegroup_objpass():
     # TODO convert to operator
     # TODO convert to grayscale image and pass it through color ramp
-    # TODO each layer with different HUE, each object on layer in different saturation
+    # TODO each layer with different HUE, each object on layer in different
+    # saturation
     Scene = bpy.context.scene
     Scene.use_nodes = True
     Tree = Scene.node_tree
     Scene.render.layers[0].use_pass_object_index = True
     Src = Tree.nodes["Render Layers"]
-    Dst = Tree.nodes["Composite"]
+    # Dst = Tree.nodes["Composite"]
     ObjPassGroup = bpy.data.node_groups.new(
         "ObjPASS", type='CompositorNodeTree')
     #
@@ -207,8 +178,9 @@ def create_nodegroup_objpass():
     ObjPassNode = Tree.nodes.new('CompositorNodeGroup')
     ObjPassNode.node_tree = bpy.data.node_groups['ObjPASS']
     x, y = Src.location
-    ObjPassNode.location = (x + 500, y - 500)
+    ObjPassNode.location = (x + 500, y - 390)
     Tree.links.new(ObjPassNode.inputs[0], Src.outputs['IndexOB'])
+
 
 class createMattPass(bpy.types.Operator):
     """Create Material Pass for Compositor"""
@@ -220,10 +192,13 @@ class createMattPass(bpy.types.Operator):
         return context.active_object is not None
 
     def execute(self, context):
-        color = True
+        color = bpy.data.scenes[0].matpass_settings.colorBool
+        if color:
+            print('color')
         asign_material_indexes(color)
         create_nodegroup_matpass()
         return {'FINISHED'}
+
 
 class createLayerPass(bpy.types.Operator):
     """Create Material Pass for Compositor"""
@@ -240,6 +215,15 @@ class createLayerPass(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class MatPassSettings(bpy.types.PropertyGroup):
+    colorBool = bpy.props.BoolProperty(name="Generate viewport color",
+                                       description="A simple bool property",
+                                       default=True)
+    xRows = bpy.props.IntProperty(name="xRows",
+                                       description="A simple bool property",
+                                       default=5)
+
+
 class MatPassPanel(bpy.types.Panel):
     """Creates a Panel in the Object properties window"""
     bl_label = 'Material Pass'
@@ -250,10 +234,9 @@ class MatPassPanel(bpy.types.Panel):
 
     def draw(self, context):
         layout = self.layout
-        obj = context.object
 
         row = layout.row()
-        row.label(text="Hello world!", icon='WORLD_DATA')
+        row.label(text=str(RANDOM_TEST_NR), icon='WORLD_DATA')
 
         row = layout.row()
         allMat = len(bpy.data.materials)
@@ -261,10 +244,11 @@ class MatPassPanel(bpy.types.Panel):
         row.label(text="There are {} materials. {} of them are active".format(
             allMat, activeMat))
         row = layout.row()
+        row.prop(bpy.data.scenes[0].matpass_settings, "xRows") #del
         row = layout.row()
-        row.operator("object.random_cubes")
+        row.prop(bpy.data.scenes[0].matpass_settings, "colorBool")
         row = layout.row()
-        row.operator("material.create_new_materials")
+        row.operator("object.random_cubes") #del
         row = layout.row()
         row.operator("material.matpass")
         row = layout.row()
@@ -272,17 +256,14 @@ class MatPassPanel(bpy.types.Panel):
 
 
 def register():
-    bpy.utils.register_class(CreateMat)
-    bpy.utils.register_class(RandomCubes)
-    bpy.utils.register_class(MatPassPanel)
     bpy.utils.register_module(__name__)
+    bpy.types.Scene.matpass_settings = bpy.props.PointerProperty(
+        type=MatPassSettings)
 
 
 def unregister():
-    bpy.utils.unregister_class(CreateMat)
-    bpy.utils.unregister_class(RandomCubes)
-    bpy.utils.unregister_class(MatPassPanel)
     bpy.utils.unregister_module(__name__)
+    del bpy.types.Scene.matpass_settings
 
 if __name__ == '__main__':
     register()
