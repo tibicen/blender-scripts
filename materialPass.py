@@ -5,11 +5,11 @@ import bpy
 
 bl_info = {
     "name": "MatPASS",
-    "description": "Create one MaterialPass ImageNode in Compositor.",
+    "description": "Create one MaterialPass\LayerPass ImageNode in Compositor.",
     "author": "Dawid Huczynski",
-    "version": (0, 2),
+    "version": (0, 5),
     "blender": (2, 67, 1),
-    "location": "View3D > Add > Mesh",
+    "location": "Proporieties > Render Layers > Material Pass",
     "warning": "",  # used for warning icon and text in addons panel
     # TODO change to blender wiki url
     "wiki_url": "https://github.com/tibicen/blender-scripts",
@@ -19,56 +19,7 @@ bl_info = {
 }
 
 DEBUG = True
-
-
-# TEST #############################################################
 RANDOM_TEST_NR = randrange(0, 500)
-
-
-def createMat():
-    bpy.data.scenes[0].render.engine = 'CYCLES'
-    for obj in bpy.data.objects:
-        if obj.type == 'MESH' or obj.type == 'CURVE':
-            obj.select = True
-            MAT = bpy.data.materials.new('Mat')
-            MAT.use_nodes = True
-            obj.data.materials.append(MAT)
-            obj.select = False
-
-
-class RandomCubes(bpy.types.Operator):
-    """Create random objects test case"""
-    bl_idname = "object.random_cubes"
-    bl_label = "Create Random Cubes"
-
-    @classmethod
-    def poll(cls, context):
-        return context.active_object is not None
-
-    def execute(self, context):
-        locations = []
-        offset = 3
-        randomLoss = bpy.data.scenes[0].matpass_settings.randomLoss
-        xRows = bpy.data.scenes[0].matpass_settings.xRows
-        for x in range(0, xRows):
-            for y in range(0, xRows):
-                for z in range(1):
-                    if randrange(0, 2) or not randomLoss:
-                        loc = (x * offset + random() - .5, y * offset +
-                               random() - .5, 1 + z * offset + random() - .1)
-                        locations.append(loc)
-        for nr, loc in enumerate(locations):
-            bpy.ops.mesh.primitive_cube_add(location=(loc))
-            obj = bpy.data.scenes[0].objects.active
-            lays = [False for x in range(19)]
-            lays.insert(1 + int(nr // (xRows**2 / 20)), True)
-            obj.layers = lays
-        createMat()
-        bpy.ops.object.camera_add(
-            location=(-33, -33, 28), rotation=(1.25, 0, -.8))
-        bpy.context.active_object.data.clip_end = 500
-        return {'FINISHED'}
-#########################################################################
 
 
 def asign_material_indexes(color=True):
@@ -87,63 +38,19 @@ def asign_material_indexes(color=True):
                     .07 + n * k * 0.93, 1, .7 + .3 * (n % 2))
 
 
-def create_nodegroup_matpass_deprecated():
-    '''An old solution for generating colornodes on material ID.'''
-    # TODO convert to grayscale image and pass it through color ramp
-    # TODO if nodegroup is aready in scene, update nodegroup
-    Scene = bpy.context.scene
-    Scene.use_nodes = True
-    Scene.render.layers[0].use_pass_material_index = True
-    Tree = Scene.node_tree
-    Src = Tree.nodes["Render Layers"]
-    # Dst = Tree.nodes["Composite"]
-    MatQuant = len(bpy.data.materials)
-    k = 1 / float(MatQuant)
-    if 'MatPASS' in bpy.data.node_groups.keys():
-        MatPassGroup = bpy.data.node_groups['MatPASS']
-        In = MatPassGroup.nodes['In']
-        Out = MatPassGroup.nodes['Out']
-        for node in MatPassGroup.nodes:
-            if node.name not in ('In', 'Out'):
-                MatPassGroup.nodes.remove(node)
-    else:
-        MatPassGroup = bpy.data.node_groups.new(
-            "MatPASS", type='CompositorNodeTree')
-        In = MatPassGroup.nodes.new('NodeGroupInput')
-        In.location = (0, 0)
-        In.name = 'In'
-        Out = MatPassGroup.nodes.new('NodeGroupOutput')
-        Out.name = 'Out'
-    Out.location = (200 * MatQuant + 200, 0)
-    for n in range(MatQuant):
-        ID = MatPassGroup.nodes.new('CompositorNodeIDMask')
-        ID.index = n + 1
-        ID.location = (200 + 200 * n, 150)
-        ID.label = ID.name
-        Mix = MatPassGroup.nodes.new('CompositorNodeMixRGB')
-        Mix.location = (400 + 200 * n, 0)
-        Mix.label = Mix.name
-        r, g, b = colorsys.hsv_to_rgb(k * n, uniform(.2, 1), uniform(.1, 1))
-        Mix.inputs[2].default_value = (r, g, b, 1)
-        # connect nodes
-        MatPassGroup.links.new(Mix.inputs[0], ID.outputs[0])
-        MatPassGroup.links.new(ID.inputs[0], In.outputs[0])
-        if n == 0:
-            PrevMix = Mix
-        else:
-            MatPassGroup.links.new(Mix.inputs[1], PrevMix.outputs[0])
-            PrevMix = Mix
-    MatPassGroup.links.new(Out.inputs[0], Mix.outputs[0])
-    if 'MatPASS' not in Tree.nodes.keys():
-        MatPassNode = Tree.nodes.new('CompositorNodeGroup')
-        MatPassNode.node_tree = bpy.data.node_groups['MatPASS']
-        MatPassNode.name = 'MatPASS'
-        x, y = Src.location
-        MatPassNode.location = (x + 500, y - 500)
-        Tree.links.new(MatPassNode.inputs[0], Src.outputs['IndexMA'])
+def asign_object_indexes():
+    for obj in bpy.data.objects:
+        for nr, layer in enumerate(obj.layers):
+            if layer:
+                obj.pass_index = nr + 1
 
 
 def create_color_var_nodes(node_group, count):
+    ''' New solution for adding color in nodeTree O(0) instead of O(1)
+        Instead of generating nodeTree of with node color for every material
+        it generates colorramp and small saturation and value variations.
+        Easier to manipulate, and possible to change color ramp variations.
+    '''
     In = node_group.nodes.new('NodeGroupInput')
     In.location = (0, 0)
     In.name = 'In'
@@ -189,11 +96,7 @@ def create_color_var_nodes(node_group, count):
 
 
 def create_nodegroup_matpass():
-    ''' New solution for adding color in nodeTree O(0) instead of O(1)
-        Instead of generating nodeTree of with node color for every material
-        it generates colorramp and small saturation and value variations.
-        Easier to manipulate, and possible to change color ramp variations.
-    '''
+    ''' Creates MateriaPASS for Compositor.'''
     Scene = bpy.context.scene
     Scene.use_nodes = True
     Scene.render.layers[0].use_pass_material_index = True
@@ -219,62 +122,8 @@ def create_nodegroup_matpass():
         Tree.links.new(MatPassNode.inputs[0], Src.outputs['IndexMA'])
 
 
-def asign_object_indexes():
-    for obj in bpy.data.objects:
-        for nr, layer in enumerate(obj.layers):
-            if layer:
-                obj.pass_index = nr + 1
-
-
-def create_nodegroup_layerpass_deprecated():
-    Scene = bpy.context.scene
-    Scene.use_nodes = True
-    Tree = Scene.node_tree
-    Scene.render.layers[0].use_pass_object_index = True
-    Src = Tree.nodes["Render Layers"]
-    # Dst = Tree.nodes["Composite"]
-    LAYERS_LEN = 20
-    k = 1 / float(LAYERS_LEN)
-    if 'LayerPASS' in bpy.data.node_groups.keys():
-        return True
-    LayPassGroup = bpy.data.node_groups.new(
-        "LayerPASS", type='CompositorNodeTree')
-    In = LayPassGroup.nodes.new('NodeGroupInput')
-    In.location = (0, 0)
-    In.name = 'In'
-    Out = LayPassGroup.nodes.new('NodeGroupOutput')
-    Out.name = 'Out'
-    Out.location = (200 * LAYERS_LEN + 200, 0)
-    for n in range(LAYERS_LEN):
-        ID = LayPassGroup.nodes.new('CompositorNodeIDMask')
-        ID.index = n + 1
-        ID.location = (200 + 200 * n, 150)
-        ID.label = ID.name
-        Mix = LayPassGroup.nodes.new('CompositorNodeMixRGB')
-        Mix.location = (400 + 200 * n, 0)
-        Mix.label = Mix.name
-        r, g, b = colorsys.hsv_to_rgb(k * n, uniform(.9, 1), uniform(.9, 1))
-        Mix.inputs[2].default_value = (r, g, b, 1)
-        # connect nodes
-        LayPassGroup.links.new(Mix.inputs[0], ID.outputs[0])
-        LayPassGroup.links.new(ID.inputs[0], In.outputs[0])
-        if n == 0:
-            PrevMix = Mix
-        else:
-            LayPassGroup.links.new(Mix.inputs[1], PrevMix.outputs[0])
-            PrevMix = Mix
-
-    #
-    LayPassGroup.links.new(Out.inputs[0], Mix.outputs[0])
-    #
-    LayPassNode = Tree.nodes.new('CompositorNodeGroup')
-    LayPassNode.node_tree = bpy.data.node_groups['LayerPASS']
-    x, y = Src.location
-    LayPassNode.location = (x + 500, y - 390)
-    Tree.links.new(LayPassNode.inputs[0], Src.outputs['IndexOB'])
-
-
 def create_nodegroup_layerpass():
+    ''' Creates LayerPASS for Compositor.'''
     Scene = bpy.context.scene
     Scene.use_nodes = True
     Tree = Scene.node_tree
@@ -297,7 +146,7 @@ def create_nodegroup_layerpass():
 
 
 class createMattPass(bpy.types.Operator):
-    """Create Material Pass for Compositor"""
+    """Create Material Pass for Compositor."""
     bl_idname = "material.matpass"
     bl_label = "Create MatPass"
 
@@ -317,7 +166,7 @@ class createMattPass(bpy.types.Operator):
 
 
 class createLayerPass(bpy.types.Operator):
-    """Create Material Pass for Compositor"""
+    """Create LAyer Pass for Compositor."""
     bl_idname = "material.layerpass"
     bl_label = "Create LayerPass"
 
@@ -335,16 +184,10 @@ class MatPassSettings(bpy.types.PropertyGroup):
     colorBool = bpy.props.BoolProperty(name="Replace viewport material colors",
                                        description="A simple bool property",
                                        default=True)
-    randomLoss = bpy.props.BoolProperty(name="Random cubes loss",
-                                        description="A simple bool property",
-                                        default=False)
-    xRows = bpy.props.IntProperty(name="xRows",
-                                       description="A simple bool property",
-                                       default=5)
 
 
 class MatPassPanel(bpy.types.Panel):
-    """Creates a Panel in the Object properties window"""
+    """Creates a Panel in the Object properties window."""
     bl_label = 'Material Pass'
     bl_idname = 'RENDERLAYER_PT_material_pass'
     bl_space_type = 'PROPERTIES'
@@ -357,7 +200,7 @@ class MatPassPanel(bpy.types.Panel):
         allMat = len(bpy.data.materials)
         activeMat = len([x for x in bpy.data.materials if x.users])
         row.label(text="There are {}/{} active materials.".format(
-             activeMat,allMat), icon='MATERIAL_DATA')
+            activeMat, allMat), icon='MATERIAL_DATA')
         row = layout.row()
         row.prop(bpy.data.scenes[0].matpass_settings, "colorBool")
 
@@ -370,18 +213,6 @@ class MatPassPanel(bpy.types.Panel):
             row.operator("material.matpass")
         row = layout.row()
         row.operator("material.layerpass")
-        if DEBUG:  # for testing purpose
-            row = layout.row()
-            row.label(text='Testing seed:' + str(RANDOM_TEST_NR), icon='ERROR')
-            row = layout.row()
-            row.prop(bpy.data.scenes[0].matpass_settings, "randomLoss")
-            row = layout.row()
-            row.prop(bpy.data.scenes[0].matpass_settings, "xRows")
-            row = layout.row()
-            row.operator("object.random_cubes")
-
-
-
 
 
 def register():
