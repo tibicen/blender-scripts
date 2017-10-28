@@ -18,18 +18,82 @@ bl_info = {
     "category": "Render"
 }
 
-DEBUG = True
+DEBUG = False
 RANDOM_TEST_NR = randrange(0, 500)
 
+# TEST ENV #########################################
 
-def asign_material_indexes(color=True):
+
+def createMat():
+    bpy.data.scenes[0].render.engine = 'CYCLES'
+    for obj in bpy.data.objects:
+        if obj.type == 'MESH' or obj.type == 'CURVE':
+            obj.select = True
+            MAT = bpy.data.materials.new('Mat')
+            MAT.use_nodes = True
+            MAT.diffuse_color = (random(), random(), random())
+            obj.data.materials.append(MAT)
+            obj.select = False
+
+
+def create_scene():
+    D = bpy.data
+    bpy.ops.object.select_all(action='SELECT')
+    bpy.ops.object.delete()
+    for typ in (D.objects, D.materials, D.meshes):
+        for el in typ:
+            typ.remove(el, do_unlink=True)
+    locations = []
+    OFFSET = 3
+    RANDOM_LOSS = False
+    ROWS = 10
+    for x in range(0, ROWS):
+        for y in range(0, ROWS):
+            for z in range(1):
+                if randrange(0, 2) or not RANDOM_LOSS:
+                    loc = (x * OFFSET + random() - .5, y * OFFSET +
+                           random() - .5, 1 + z * OFFSET + random() - .1)
+                    locations.append(loc)
+    for nr, loc in enumerate(locations):
+        bpy.ops.mesh.primitive_cube_add(location=(loc))
+        obj = bpy.data.scenes[0].objects.active
+        lays = [False for x in range(19)]
+        lays.insert(1 + int(nr // (ROWS**2 / 20)), True)
+        obj.layers = lays
+    createMat()
+    bpy.ops.object.camera_add(location=(-20, -20, 35),
+                              rotation=(0.9, -0.0, -0.8))
+    bpy.context.active_object.data.clip_end = 500
+
+####################################################
+
+
+def get_visible_materials():
+    materials = []
+    active_layers = bpy.data.scenes[0].layers
+    for obj in bpy.data.objects:
+        layer_comparison = list(zip(list(obj.layers),
+                                    list(bpy.data.scenes[0].layers)))
+        if sum([a and b for a, b in layer_comparison]):
+            for slot in obj.material_slots:
+                if slot.material not in materials:
+                    if slot.material is not None:
+                        materials.append(slot.material)
+    return materials
+
+
+def asign_material_indexes(color=True, only_visible=False):
     # TODO recreate colors from nodes: hue >> modulo >> *1.5 >> sat&val
+    if not only_visible:
+        materials = bpy.data.materials
+    else:
+        materials = get_visible_materials()
     indexes = [False if x.pass_index ==
-               0 else True for x in bpy.data.materials]
-    if sum(indexes) < len(bpy.data.materials):
-        MatQuant = len(bpy.data.materials)
+               0 else True for x in materials]
+    if sum(indexes) < len(materials):
+        MatQuant = len(materials)
         k = 1 / float(MatQuant)
-        for n, mat in enumerate(bpy.data.materials):
+        for n, mat in enumerate(materials):
             mat.use_nodes = True
             mat.pass_index = n + 1
             if color:
@@ -38,7 +102,7 @@ def asign_material_indexes(color=True):
                     .07 + n * k * 0.93, 1, .7 + .3 * (n % 2))
 
 
-def asign_object_indexes():
+def asign_object_indexes(only_visible=False):
     for obj in bpy.data.objects:
         for nr, layer in enumerate(obj.layers):
             if layer:
@@ -103,7 +167,11 @@ def create_nodegroup_matpass():
     Scene.render.layers[0].pass_alpha_threshold = .001
     Tree = Scene.node_tree
     Src = Tree.nodes["Render Layers"]
-    MatQuant = len(bpy.data.materials)
+    if bpy.data.scenes[0].matpass_settings.onlyVisible:
+        materials = get_visible_materials()
+    else:
+        materials = bpy.data.materials
+    MatQuant = len(materials)
     if 'MatPASS' in bpy.data.node_groups.keys():
         MatPASS = bpy.data.node_groups['MatPASS']
         MatPASS.nodes['Divide'].inputs[1].default_value = MatQuant
@@ -145,6 +213,12 @@ def create_nodegroup_layerpass():
         Tree.links.new(LayPassNode.inputs[0], Src.outputs['IndexOB'])
 
 
+def view_object_layers():
+    STORAGE = {}
+    for obj in bpy.data.objects:
+        STORAGE[obj.name] = obj.diff
+
+
 class createMattPass(bpy.types.Operator):
     """Create Material Pass for Compositor."""
     bl_idname = "material.matpass"
@@ -158,9 +232,10 @@ class createMattPass(bpy.types.Operator):
         if len(bpy.data.materials) == 0:
             raise(ZeroDivisionError)
         color = bpy.data.scenes[0].matpass_settings.colorBool
+        only_visible = bpy.data.scenes[0].matpass_settings.onlyVisible
         if color:
             print('color')
-        asign_material_indexes(color)
+        asign_material_indexes(color, only_visible)
         create_nodegroup_matpass()
         return {'FINISHED'}
 
@@ -183,7 +258,10 @@ class createLayerPass(bpy.types.Operator):
 class MatPassSettings(bpy.types.PropertyGroup):
     colorBool = bpy.props.BoolProperty(name="Replace viewport material colors",
                                        description="A simple bool property",
-                                       default=True)
+                                       default=False)
+    onlyVisible = bpy.props.BoolProperty(name="Only visible",
+                                         description="A simple bool property",
+                                         default=False)
 
 
 class MatPassPanel(bpy.types.Panel):
@@ -197,13 +275,18 @@ class MatPassPanel(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         row = layout.row()
-        allMat = len(bpy.data.materials)
-        activeMat = len([x for x in bpy.data.materials if x.users])
+        if bpy.data.scenes[0].matpass_settings.onlyVisible:
+            materials = get_visible_materials()
+        else:
+            materials = bpy.data.materials
+        allMat = len(materials)
+        activeMat = len([x for x in materials if x.users])
         row.label(text="There are {}/{} active materials.".format(
             activeMat, allMat), icon='MATERIAL_DATA')
         row = layout.row()
         row.prop(bpy.data.scenes[0].matpass_settings, "colorBool")
-
+        row = layout.row()
+        row.prop(bpy.data.scenes[0].matpass_settings, "onlyVisible")
         row = layout.row()
         if activeMat == 0:
             row.label(text='Unable to create MatPass.')
@@ -227,3 +310,5 @@ def unregister():
 
 if __name__ == '__main__':
     register()
+    if DEBUG:
+        create_scene()

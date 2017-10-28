@@ -4,7 +4,6 @@ This is repository of my work in progress scripts for [Blender](https://www.blen
 ####[bpy]
 Fun with blender bpy library and random library. Simple walkers script visualization.
 <img src="https://github.com/tibicen/blender-scripts/blob/master/imgs/blender_random.jpg" width="300">
-
 ##materialPass.py
 ####[bpy]
 Small functionality for  Blender. Creates Material Pass, and Layer Pass for Compositor.
